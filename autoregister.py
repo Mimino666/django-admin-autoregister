@@ -67,7 +67,10 @@ def _get_admin_queryset(admin_class, count_field_names):
 
     counts = map(Count, count_field_names)
     def queryset(self, request):
-        return super(admin_class, self).queryset(request).annotate(*counts)
+        qs = super(admin_class, self).queryset(request)
+        if counts:
+            qs = qs.annotate(*counts)
+        return qs
     return queryset
 
 
@@ -86,7 +89,7 @@ def autoregister_admin(module, exclude=None, model_fields=None,
     @type model_fields: dict or None
 
     @param admin_fields: dictionary of additional admin fields
-        {'model name': [(name, value), ...]}
+        {'model name': {name: value, ...}}
     @type admin_fields: dict or None
     '''
 
@@ -141,7 +144,7 @@ def autoregister_admin(module, exclude=None, model_fields=None,
         admin_class.queryset = _get_admin_queryset(admin_class, count_field_names)
 
         # add custom admin fields
-        for name, value in admin_fields.get(model.__name__, []):
+        for (name, value) in admin_fields.get(model.__name__, {}).iteritems():
             setattr(admin_class, name, value)
 
         try:
