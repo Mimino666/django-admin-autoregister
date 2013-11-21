@@ -124,6 +124,7 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
         admin_class = type('%sAdmin' % model.__name__, (admin.ModelAdmin,), dict())
         # list pk as the first value
         admin_class.list_display = [model._meta.pk.name]
+        admin_class.raw_id_fields = []
         exclude_field_names = set(exclude_fields.get(model.__name__, []))
         # list all the other fields
         for field in model._meta.fields:
@@ -133,6 +134,7 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
             admin_field_name = field.name
             # create link for related objects
             if isinstance(field, (ForeignKey, OneToOneField)):
+                admin_class.raw_id_fields.append(field.name)
                 admin_field_name += '_link'
                 setattr(admin_class, admin_field_name, _get_admin_change_url(field))
 
@@ -140,6 +142,7 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
 
         count_field_names = []
         for field in model._meta.many_to_many:
+            admin_class.raw_id_fields.append(field.name)
             count_field_names.append(field.name)
             admin_field_name = field.name + '_link'
             setattr(admin_class, admin_field_name, _get_admin_changelist_url(field))
