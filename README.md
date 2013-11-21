@@ -40,18 +40,24 @@ autoregister_admin(models)
 And that's it! All the models in the module have admin views successfully created and registered.
 
 
-If you want to exclude some models and manully create admin for them, use optional *exclude* parameter:
+If you want to exclude some models and manully create admin for them, use optional *exclude_models* parameter:
 
 ```python
-autoregister(models, exclude=['ModelName1', 'ModelName2'])
+autoregister(models, exclude_models=['ModelName1', 'ModelName2'])
 ```
 
 If you want to display some additional fields for the models (e.g. some properties),
 use optional *model_fields* parameter:
 
 ```python
-# property_a and property_b will be displayed in admin as well
-autoregister(models, model_fields={'ModelName1': ['property_a', 'property_b']})
+autoregister(models, model_fields={'ModelName': ['property_1', 'property_2']})
+```
+
+On the other hand, if you want to exclude some field from displaying, use
+optional *exclude_fields* parameter:
+
+```python
+autoregister(models, exclude_fields={'ModelName': ['exclude_field1', 'exclude_field2']})
 ```
 
 If you want to do a little modifications to the generated admins (e.g. add search fields),
@@ -60,7 +66,7 @@ use optional *admin_fields* parameter:
 ```python
 autoregister(models,
   admin_fields={
-    'ModelName1': {'search_fields': ['name'], 'list_filter': ['active']}
+    'ModelName': {'search_fields': ['name'], 'list_filter': ['active']}
   }
 )
 ```

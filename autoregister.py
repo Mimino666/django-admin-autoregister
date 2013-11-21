@@ -13,6 +13,7 @@ def _get_admin_change_url(field):
     @param field: field pointing to a related object
     @type field: ForeignKey or OneToOneField
     '''
+
     related_model = field.related.parent_model
 
     def f(self, obj):
@@ -60,7 +61,7 @@ def _get_admin_changelist_url(field):
     return f
 
 
-def _get_admin_queryset(admin_class, count_field_names):
+def _get_admin_queryset(admin_class, count_field_names, exclude_field_names):
     '''Return function to generate queryset to efficiently fetch counts()
     of related objects.
     '''
@@ -70,31 +71,38 @@ def _get_admin_queryset(admin_class, count_field_names):
         qs = super(admin_class, self).queryset(request)
         if counts:
             qs = qs.annotate(*counts)
+        if exclude_field_names:
+            qs = qs.defer(*exclude_field_names)
         return qs
     return queryset
 
 
-def autoregister_admin(module, exclude=None, model_fields=None,
-                          admin_fields=None):
+def autoregister_admin(module, exclude_models=None, model_fields=None,
+                       exclude_fields=None, admin_fields=None):
     '''
     @param module: module containing django.db.models classes
     @type module: str or __module__
                   If you are providing str, use absolute path.
 
-    @param exclude: list of classes to exclude from auto-register
-    @type exclude: iterable of strings or None
+    @param exclude_models: list of models to exclude from auto-register
+    @type exclude_models: iterable of strings or None
 
     @param model_fields: dictionary of additional fields for list_display
-        {'model name': [field1, field2, ...]}
+        {'model_name': [field_name1, field_name2, ...]}
     @type model_fields: dict or None
 
+    @param exclude_fields: dictionary of fields to exclude from the models
+        {'model_name': [field_name1, field_name2, ...]}
+    @type exclude_fields: dict or None
+
     @param admin_fields: dictionary of additional admin fields
-        {'model name': {name: value, ...}}
+        {'model_name': {name: value, ...}}
     @type admin_fields: dict or None
     '''
 
-    exclude = exclude or []
+    exclude_models = set(exclude_models or [])
     model_fields = model_fields or {}
+    exclude_fields = exclude_fields or {}
     admin_fields = admin_fields or {}
     if isinstance(module, basestring):
         module = __import__(module, fromlist=[module.split('.')[-1]])
@@ -108,7 +116,7 @@ def autoregister_admin(module, exclude=None, model_fields=None,
         if (isinstance(model, ModelBase) and
                 model.__module__ == module.__name__ and
                 not model._meta.abstract and
-                model.__name__ not in exclude):
+                model.__name__ not in exclude_models):
             models.append(model)
 
     # for each model prepare an admin class `<model_name>Admin`
@@ -116,9 +124,10 @@ def autoregister_admin(module, exclude=None, model_fields=None,
         admin_class = type('%sAdmin' % model.__name__, (admin.ModelAdmin,), dict())
         # list pk as the first value
         admin_class.list_display = [model._meta.pk.name]
+        exclude_field_names = set(exclude_fields.get(model.__name__, []))
         # list all the other fields
         for field in model._meta.fields:
-            if field == model._meta.pk:
+            if field == model._meta.pk or field.name in exclude_field_names:
                 continue
 
             admin_field_name = field.name
@@ -141,7 +150,8 @@ def autoregister_admin(module, exclude=None, model_fields=None,
             admin_class.list_display.append(name)
 
         # prefetch related fields
-        admin_class.queryset = _get_admin_queryset(admin_class, count_field_names)
+        admin_class.queryset = _get_admin_queryset(admin_class,
+            count_field_names, exclude_field_names)
 
         # add custom admin fields
         for (name, value) in admin_fields.get(model.__name__, {}).iteritems():
