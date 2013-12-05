@@ -2,6 +2,7 @@ from types import ModuleType
 
 from django.contrib import admin
 from django.contrib.admin.util import quote
+from django.contrib.admin.views.main import ChangeList
 from django.core.urlresolvers import reverse, NoReverseMatch
 from django.db.models import ForeignKey, OneToOneField, Count
 from django.db.models.base import ModelBase
@@ -61,20 +62,32 @@ def _get_admin_changelist_url(field):
     return f
 
 
-def _get_admin_queryset(admin_class, count_field_names, exclude_field_names):
-    '''Return function to generate queryset to efficiently fetch counts()
-    of related objects.
-    '''
-
-    counts = [Count(c, distinct=True) for c in count_field_names]
+def _set_admin_queryset(admin_class, count_field_names, exclude_field_names):
     def queryset(self, request):
         qs = super(admin_class, self).queryset(request)
-        if counts:
-            qs = qs.annotate(*counts)
         if exclude_field_names:
             qs = qs.defer(*exclude_field_names)
         return qs
-    return queryset
+    admin_class.queryset = queryset
+
+    # Now beware, the magic happens!
+    # For each m2m relation, we would like to display the number of related
+    # objects. To optimize it, we fetch the counts in one annotated query.
+    # We could put this code in the above queryset() method, but...!
+    # When Django admin asks for the total number of objects for pagination
+    # purposes, it uses above-returned queryset for it. If we were to set
+    # annotate (which performs multi-table joins) on that queryset, it would
+    # result into VERY slow count() query.
+    # That's why we are waiting with annotating until the last possible
+    # moment, when the counts where already fetched.
+    counts = [Count(c, distinct=True) for c in count_field_names]
+    def get_changelist(self, *args, **kwargs):
+        def get_results(self, request):
+            super(self.__class__, self).get_results(request)
+            if counts:
+                self.result_list = self.result_list.annotate(*counts)
+        return type('HackChangeList', (ChangeList,), {'get_results': get_results})
+    admin_class.get_changelist = get_changelist
 
 
 def autoregister_admin(module, exclude_models=None, model_fields=None,
@@ -152,13 +165,11 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
         for name in model_fields.get(model.__name__, []):
             admin_class.list_display.append(name)
 
-        # prefetch related fields
-        admin_class.queryset = _get_admin_queryset(admin_class,
-            count_field_names, exclude_field_names)
-
         # add custom admin fields
         for (name, value) in admin_fields.get(model.__name__, {}).iteritems():
             setattr(admin_class, name, value)
+
+        _set_admin_queryset(admin_class, count_field_names, exclude_field_names)
 
         try:
             admin.site.register(model, admin_class)
