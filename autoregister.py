@@ -85,6 +85,13 @@ def _set_admin_queryset(admin_class, m2m_field_names, exclude_field_names):
     admin_class.get_changelist = get_changelist
 
 
+def _get_pk_func(field):
+    def pk_func(obj):
+        return getattr(obj, field.attname)
+    pk_func.short_description = field.name
+    return pk_func
+
+
 def autoregister_admin(module, exclude_models=None, model_fields=None,
                        exclude_fields=None, admin_fields=None,
                        reversed_relations=None):
@@ -138,10 +145,15 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
     for model in models:
         model_name = model.__name__
         admin_class = type('%sAdmin' % model_name, (admin.ModelAdmin,), dict())
-        # add pk as the first value
-        admin_class.list_display = [model._meta.pk.name]
+        admin_class.list_display = []
         admin_class.raw_id_fields = []
         exclude_field_names = set(exclude_fields.get(model_name, []))
+        # add pk as the first value - access pk value through proxy, otherwise
+        # when it is a related object, it is fetched too
+        pk_field = model._meta.pk
+        admin_class.list_display.append(_get_pk_func(pk_field))
+        if isinstance(pk_field, (ForeignKey, OneToOneField)):
+            admin_class.raw_id_fields.append(pk_field.name)
         # add other model fields
         for field in model._meta.fields:
             if field == model._meta.pk or field.name in exclude_field_names:
