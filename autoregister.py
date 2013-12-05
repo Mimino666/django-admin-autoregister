@@ -17,13 +17,13 @@ def _get_admin_change_url(field):
 
     related_model = field.related.parent_model
 
-    def f(self, obj):
+    def f(obj):
         link_args = getattr(obj, field.attname)
         if link_args is None:
             return u'(None)'
         # we could use field.name to output __unicode__() of the related object,
         # but that would require to prefetch related objects, which can be slow
-        link_text = getattr(obj, field.attname)
+        link_text = u'%s %s' % (related_model.__name__, getattr(obj, field.attname))
 
         try:
             url = reverse('admin:%s_%s_change' %
@@ -37,32 +37,27 @@ def _get_admin_change_url(field):
     return f
 
 
-def _get_admin_changelist_url(field):
-    '''Return function to generate admin changlelist view url for the related
-    objects.
-
-    @param field: field pointing to the related objects
-    @type field: ManyToManyField
+def _get_admin_changelist_url(source_field_name, target_model, target_field_name):
+    '''Return function to generate admin changlelist view url for target_model.
     '''
 
-    related_model = field.related.parent_model
-
-    def f(self, obj):
-        link_cond = '%s=%s' % (field.related_query_name(), quote(obj.pk))
-        link_text = u'%s (%s)' % (field.name.title(), getattr(obj, '%s__count' % field.name))
+    def f(obj):
+        link_cond = '%s=%s' % (target_field_name, quote(obj.pk))
+        link_text = u'%s (%s)' % (target_model._meta.verbose_name_plural.title(),
+                                  getattr(obj, '%s__count' % source_field_name))
 
         try:
             url = reverse('admin:%s_%s_changelist' %
-                            (related_model._meta.app_label, related_model._meta.module_name))
+                            (target_model._meta.app_label, target_model._meta.module_name))
         except NoReverseMatch:
             return link_text
         return u'<a href="%s?%s">%s</a>' % (url, link_cond, link_text)
     f.allow_tags = True
-    f.short_description = field.name
+    f.short_description = target_model.__name__
     return f
 
 
-def _set_admin_queryset(admin_class, count_field_names, exclude_field_names):
+def _set_admin_queryset(admin_class, m2m_field_names, exclude_field_names):
     def queryset(self, request):
         qs = super(admin_class, self).queryset(request)
         if exclude_field_names:
@@ -80,7 +75,7 @@ def _set_admin_queryset(admin_class, count_field_names, exclude_field_names):
     # result into VERY slow count() query.
     # That's why we are waiting with annotating until the last possible
     # moment, when the counts where already fetched.
-    counts = [Count(c, distinct=True) for c in count_field_names]
+    counts = [Count(c, distinct=True) for c in m2m_field_names]
     def get_changelist(self, *args, **kwargs):
         def get_results(self, request):
             super(self.__class__, self).get_results(request)
@@ -91,7 +86,8 @@ def _set_admin_queryset(admin_class, count_field_names, exclude_field_names):
 
 
 def autoregister_admin(module, exclude_models=None, model_fields=None,
-                       exclude_fields=None, admin_fields=None):
+                       exclude_fields=None, admin_fields=None,
+                       reversed_relations=None):
     '''
     @param module: module containing django.db.models classes
     @type module: str or __module__
@@ -101,22 +97,28 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
     @type exclude_models: iterable of strings or None
 
     @param model_fields: dictionary of additional fields for list_display
-        {'model_name': [field_name1, field_name2, ...]}
+        {model_name: [field_name1, field_name2, ...]}
     @type model_fields: dict or None
 
     @param exclude_fields: dictionary of fields to exclude from the models
-        {'model_name': [field_name1, field_name2, ...]}
+        {model_name: [field_name1, field_name2, ...]}
     @type exclude_fields: dict or None
 
     @param admin_fields: dictionary of additional admin fields
-        {'model_name': {name: value, ...}}
+        {model_name: {admin_field_name: value, ...}}
     @type admin_fields: dict or None
+
+    @param reversed_relations: dictionary of additional reversed m2m/fk
+                               relations to include to admin
+        {model_name: [relation_name1, relation_name2, ...]}
+    @type reversed_relations: dict or None
     '''
 
     exclude_models = set(exclude_models or [])
     model_fields = model_fields or {}
     exclude_fields = exclude_fields or {}
     admin_fields = admin_fields or {}
+    reversed_relations = reversed_relations or {}
     if isinstance(module, basestring):
         module = __import__(module, fromlist=[module.split('.')[-1]])
     elif not isinstance(module, ModuleType):
@@ -134,42 +136,53 @@ def autoregister_admin(module, exclude_models=None, model_fields=None,
 
     # for each model prepare an admin class `<model_name>Admin`
     for model in models:
-        admin_class = type('%sAdmin' % model.__name__, (admin.ModelAdmin,), dict())
-        # list pk as the first value
+        model_name = model.__name__
+        admin_class = type('%sAdmin' % model_name, (admin.ModelAdmin,), dict())
+        # add pk as the first value
         admin_class.list_display = [model._meta.pk.name]
         admin_class.raw_id_fields = []
-        exclude_field_names = set(exclude_fields.get(model.__name__, []))
-        # list all the other fields
+        exclude_field_names = set(exclude_fields.get(model_name, []))
+        # add other model fields
         for field in model._meta.fields:
             if field == model._meta.pk or field.name in exclude_field_names:
                 continue
-
-            admin_field_name = field.name
-            # create link for related objects
             if isinstance(field, (ForeignKey, OneToOneField)):
                 admin_class.raw_id_fields.append(field.name)
-                admin_field_name += '_link'
-                setattr(admin_class, admin_field_name, _get_admin_change_url(field))
+                admin_class.list_display.append(_get_admin_change_url(field))
+            else:
+                admin_class.list_display.append(field.name)
 
-            admin_class.list_display.append(admin_field_name)
-
-        count_field_names = []
+        m2m_field_names = []
+        # add m2m fields
         for field in model._meta.many_to_many:
             admin_class.raw_id_fields.append(field.name)
-            count_field_names.append(field.name)
-            admin_field_name = field.name + '_link'
-            setattr(admin_class, admin_field_name, _get_admin_changelist_url(field))
-            admin_class.list_display.append(admin_field_name)
+            m2m_field_names.append(field.name)
+            change_list_url = _get_admin_changelist_url(
+                field.name, field.related.parent_model, field.related_query_name())
+            admin_class.list_display.append(change_list_url)
+
+        # add reversed relations
+        reversed_related_objs = (model._meta.get_all_related_objects() +
+                                 model._meta.get_all_related_many_to_many_objects())
+        allowed_reversed_relations = reversed_relations.get(model_name, [])
+        for related in reversed_related_objs:
+            related_name = related.field.related_query_name()
+            if related_name not in allowed_reversed_relations:
+                continue
+            m2m_field_names.append(related_name)
+            change_list_url = _get_admin_changelist_url(
+                related_name, related.model, related.field.name)
+            admin_class.list_display.append(change_list_url)
 
         # add custom model fields
-        for name in model_fields.get(model.__name__, []):
+        for name in model_fields.get(model_name, []):
             admin_class.list_display.append(name)
 
         # add custom admin fields
-        for (name, value) in admin_fields.get(model.__name__, {}).iteritems():
+        for (name, value) in admin_fields.get(model_name, {}).iteritems():
             setattr(admin_class, name, value)
 
-        _set_admin_queryset(admin_class, count_field_names, exclude_field_names)
+        _set_admin_queryset(admin_class, m2m_field_names, exclude_field_names)
 
         try:
             admin.site.register(model, admin_class)
