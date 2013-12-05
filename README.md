@@ -39,28 +39,35 @@ autoregister_admin(models)
 
 And that's it! All the models in the module have admin views successfully created and registered.
 
+#### exclude_models
 
-If you want to exclude some models and manully create admin for them, use optional *exclude_models* parameter:
+To exclude some models and manully create admin for them, use optional *exclude_models* parameter:
 
 ```python
 autoregister(models, exclude_models=['ModelName1', 'ModelName2'])
 ```
 
-If you want to display some additional fields for the models (e.g. some properties),
+#### model_fields
+
+To display some additional fields for the models (e.g. some properties),
 use optional *model_fields* parameter:
 
 ```python
 autoregister(models, model_fields={'ModelName': ['property_1', 'property_2']})
 ```
 
-On the other hand, if you want to exclude some field from displaying, use
+#### exclude_fields
+
+To exclude some fields from displaying, use
 optional *exclude_fields* parameter:
 
 ```python
 autoregister(models, exclude_fields={'ModelName': ['exclude_field1', 'exclude_field2']})
 ```
 
-If you want to do a little modifications to the generated admins (e.g. add search fields),
+#### admin_fields
+
+To do a little modifications to the generated admins (e.g. add search fields),
 use optional *admin_fields* parameter:
 
 ```python
@@ -69,4 +76,21 @@ autoregister(models,
     'ModelName': {'search_fields': ['name'], 'list_filter': ['active']}
   }
 )
+```
+
+#### reversed_relations
+
+To include links to reversed relations of ForeignKey or Many2Many fields,
+use optional *reversed_relations* parameter:
+
+```python
+# suppose we have the following models
+class Model1(models.Model):
+    pass
+
+class Model2(models.Model):
+    model1 = models.ForeignKey(Model1)  # this will be added automatically
+#-------------------------------------------------------------------------
+
+autoregister(models, reversed_relations={'Model1': ['model2']})
 ```
