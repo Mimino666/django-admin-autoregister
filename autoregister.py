@@ -66,7 +66,7 @@ def _get_admin_queryset(admin_class, count_field_names, exclude_field_names):
     of related objects.
     '''
 
-    counts = map(Count, count_field_names)
+    counts = [Count(c, distinct=True) for c in count_field_names]
     def queryset(self, request):
         qs = super(admin_class, self).queryset(request)
         if counts:
