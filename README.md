@@ -39,6 +39,9 @@ autoregister_admin(models)
 
 And that's it! All the models in the module have admin views successfully created and registered.
 
+Customization
+-------------
+
 #### exclude_models
 
 To exclude some models and manully create admin for them, use optional *exclude_models* parameter:
